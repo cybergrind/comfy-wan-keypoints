@@ -10,6 +10,7 @@ from comfy_api.latest import io
 def process_keyframe(keyframe_image, position, width, height, length, image, mask):
     """
     Helper method to process a keyframe image and update the image tensor and mask.
+    Universal approach without conditionals, using VAE's 4-frame grouping.
 
     Args:
         keyframe_image: The keyframe image to process
@@ -23,30 +24,80 @@ def process_keyframe(keyframe_image, position, width, height, length, image, mas
     Returns:
         Updated image and mask tensors
     """
-    if keyframe_image is not None:
-        if position == 0:
-            # Process start image
-            processed_image = comfy.utils.common_upscale(
-                keyframe_image[:length].movedim(-1, 1), width, height, 'bilinear', 'center'
-            ).movedim(1, -1)
-            image[: processed_image.shape[0]] = processed_image
-            mask[:, :, : processed_image.shape[0] + 3] = 0.0
-        elif position == length - 1:
-            # Process end image
-            processed_image = comfy.utils.common_upscale(
-                keyframe_image[-length:].movedim(-1, 1), width, height, 'bilinear', 'center'
-            ).movedim(1, -1)
-            image[-processed_image.shape[0] :] = processed_image
-            mask[:, :, -processed_image.shape[0] :] = 0.0
-        else:
-            # Process middle keyframe at specific position
-            processed_keyframe = comfy.utils.common_upscale(
-                keyframe_image[:1].movedim(-1, 1), width, height, 'bilinear', 'center'
-            ).movedim(1, -1)
-            # Place the keyframe at the specified position
-            image[position] = processed_keyframe[0]
-            # Mark this frame and a few around it as known
-            mask[:, :, position * 4 : (position + 1) * 4] = 0.0
+    if keyframe_image is None:
+        return image, mask
+
+    """
+    Dimensions for image and mask:
+        image = torch.ones((length, height, width, 3)) * 0.5
+        mask = torch.ones((1, 1, latent.shape[2] * 4, latent.shape[-2], latent.shape[-1]))
+    """
+
+    # For simplicity, let's keep the special handling for start/end vs middle
+    # This matches the original WanFirstLastFrameToVideo behavior
+    is_start = position == 0
+    is_end = position == length - 1
+
+    if is_start:
+        # Start frame: process from beginning
+        processed_image = comfy.utils.common_upscale(
+            keyframe_image[:length].movedim(-1, 1), width, height, 'bilinear', 'center'
+        ).movedim(1, -1)
+        num_frames = processed_image.shape[0]
+
+        # Image placement
+        image_start = 0
+        image_end = num_frames
+        print(f'Placing start frame: {image_start} to {image_end}. {processed_image.shape=} {image.shape=}')
+        image[image_start:image_end] = processed_image
+
+        # Mask calculation (with +3 padding as per original)
+        mask_start = 0
+        mask_end = min(num_frames + 3, mask.shape[2])
+
+    elif is_end:
+        # End frame: process from end
+        processed_image = comfy.utils.common_upscale(
+            keyframe_image[-length:].movedim(-1, 1), width, height, 'bilinear', 'center'
+        ).movedim(1, -1)
+        num_frames = processed_image.shape[0]
+
+        # Image placement
+        image_start = length - num_frames
+        image_end = length
+        image[image_start:image_end] = processed_image
+        print(f'Placing end frame: {image_start} to {image_end}. {processed_image.shape=} {image.shape=}')
+
+        # Mask calculation - the mask indices should match the image indices
+        # But mask might be slightly larger due to VAE padding
+        # The original WanFirstLastFrameToVideo uses negative indexing: mask[:, :, -num_frames:]
+        # This works because it counts from the end of the mask array
+        mask_start = mask.shape[2] - num_frames
+        mask_end = mask.shape[2]
+
+    else:
+        # Middle keyframe: handle VAE 4-frame grouping
+        processed_image = comfy.utils.common_upscale(
+            keyframe_image[:1].movedim(-1, 1), width, height, 'bilinear', 'center'
+        ).movedim(1, -1)
+
+        # Calculate 4-frame group boundaries
+        latent_group = position // 4
+        image_start = latent_group * 4
+        image_end = min((latent_group + 1) * 4, length)
+
+        # Fill the entire group with the single frame
+        for i in range(image_start, image_end):
+            print(f'Placing middle frame: {i}. {processed_image.shape=} {image.shape=}')
+            image[i] = processed_image[0]
+
+        # Mask matches the image group
+        mask_start = image_start + 4
+        mask_end = min(image_end + 4, mask.shape[2])
+
+    # Apply mask
+    print(f'Applying mask: {mask_start} to {mask_end}. {mask.shape=} length={length}')
+    mask[:, :, mask_start:mask_end] = 0.0
 
     return image, mask
 
