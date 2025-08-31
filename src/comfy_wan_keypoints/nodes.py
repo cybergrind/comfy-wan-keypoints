@@ -7,7 +7,7 @@ import torch
 from comfy_api.latest import io
 
 
-def process_keyframe(keyframe_image, position, width, height, length, image, mask):
+def process_keyframe(keyframe_image, position, width, height, length, image, mask, mask_strength=0.0):
     """
     Helper method to process a keyframe image and update the image tensor and mask.
     Universal approach without conditionals, using VAE's 4-frame grouping.
@@ -86,18 +86,34 @@ def process_keyframe(keyframe_image, position, width, height, length, image, mas
         image_start = latent_group * 4
         image_end = min((latent_group + 1) * 4, length)
 
-        # Fill the entire group with the single frame
-        for i in range(image_start, image_end):
-            print(f'Placing middle frame: {i}. {processed_image.shape=} {image.shape=}')
-            image[i] = processed_image[0]
+        image_start = position
+        image_end = position + 1
+        image[image_start - 1 : image_end - 1] = processed_image
+        image[image_start:image_end] = processed_image
+        image[image_start + 1 : image_end + 1] = processed_image
+        print(f'Placing middle frame: {position}. {processed_image.shape=} {image.shape=}')
+        """
+Placing middle frame: 24. processed_image.shape=torch.Size([1, 480, 320, 3]) image.shape=torch.Size([81, 480, 320, 3])
+Placing middle frame: 25. processed_image.shape=torch.Size([1, 480, 320, 3]) image.shape=torch.Size([81, 480, 320, 3])
+Placing middle frame: 26. processed_image.shape=torch.Size([1, 480, 320, 3]) image.shape=torch.Size([81, 480, 320, 3])
+Placing middle frame: 27. processed_image.shape=torch.Size([1, 480, 320, 3]) image.shape=torch.Size([81, 480, 320, 3])
+        """
+
+        # # Fill the entire group with the single frame
+        # for i in range(image_start, image_end):
+        #     print(f'Placing middle frame: {i}. {processed_image.shape=} {image.shape=}')
+        #     image[i] = processed_image[0]
 
         # Mask matches the image group
-        mask_start = image_start + 4
-        mask_end = min(image_end + 4, mask.shape[2])
+        mask_start = position
+        mask_end = min(mask_start + 1, mask.shape[2])
+        mask[:, :, mask_start - 1 : mask_end - 1] = max(mask_strength + 0.3, 1.0)
+        mask[:, :, mask_start + 1 : mask_end + 1] = max(mask_strength + 0.3, 1.0)
+        mask_strength = mask_strength
 
     # Apply mask
-    print(f'Applying mask: {mask_start} to {mask_end}. {mask.shape=} length={length}')
-    mask[:, :, mask_start:mask_end] = 0.0
+    print(f'Applying mask: {mask_start} to {mask_end}. {mask.shape=} length={length} {mask_strength=}')
+    mask[:, :, mask_start:mask_end] = mask_strength
 
     return image, mask
 
