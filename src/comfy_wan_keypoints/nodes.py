@@ -55,6 +55,7 @@ class WanKeyframes(io.ComfyNode):
     """
     A node that creates video conditioning with keyframe images distributed evenly across the video length.
     Accepts start and end images plus up to 3 additional keyframe images and their optional clip vision outputs.
+    Keyframes can be positioned automatically (evenly distributed) or at specific frame positions.
     """
 
     @classmethod
@@ -80,6 +81,28 @@ class WanKeyframes(io.ComfyNode):
                 io.Image.Input('keyframe_image_1', optional=True),
                 io.Image.Input('keyframe_image_2', optional=True),
                 io.Image.Input('keyframe_image_3', optional=True),
+                # Position inputs - -1 for auto, or specific frame number
+                io.Int.Input(
+                    'keyframe_position_1',
+                    default=-1,
+                    min=-1,
+                    max=nodes.MAX_RESOLUTION,
+                    tooltip='Frame position for keyframe 1. Use -1 for auto or enter a specific frame number',
+                ),
+                io.Int.Input(
+                    'keyframe_position_2',
+                    default=-1,
+                    min=-1,
+                    max=nodes.MAX_RESOLUTION,
+                    tooltip='Frame position for keyframe 2. Use -1 for auto or enter a specific frame number',
+                ),
+                io.Int.Input(
+                    'keyframe_position_3',
+                    default=-1,
+                    min=-1,
+                    max=nodes.MAX_RESOLUTION,
+                    tooltip='Frame position for keyframe 3. Use -1 for auto enter a specific frame number',
+                ),
             ],
             outputs=[
                 io.Conditioning.Output(display_name='positive'),
@@ -103,6 +126,9 @@ class WanKeyframes(io.ComfyNode):
         keyframe_image_1=None,
         keyframe_image_2=None,
         keyframe_image_3=None,
+        keyframe_position_1=-1,
+        keyframe_position_2=-1,
+        keyframe_position_3=-1,
         clip_vision_start_image=None,
         clip_vision_end_image=None,
         clip_vision_keyframe_1=None,
@@ -126,22 +152,49 @@ class WanKeyframes(io.ComfyNode):
         # Process start image (position 0)
         image, mask = process_keyframe(start_image, 0, width, height, length, image, mask)
 
-        # Collect and place middle keyframe images evenly
-        keyframe_images = [keyframe_image_1, keyframe_image_2, keyframe_image_3]
-        keyframe_images = [kf for kf in keyframe_images if kf is not None]
+        # Collect keyframe data with their positions
+        keyframe_data = []
+        if keyframe_image_1 is not None:
+            keyframe_data.append((keyframe_image_1, keyframe_position_1))
+        if keyframe_image_2 is not None:
+            keyframe_data.append((keyframe_image_2, keyframe_position_2))
+        if keyframe_image_3 is not None:
+            keyframe_data.append((keyframe_image_3, keyframe_position_3))
 
-        num_keyframes = len(keyframe_images)
-        if num_keyframes > 0:
-            # Calculate positions for keyframes
-            # If we have n keyframes, divide the length into n+1 segments
-            segments = num_keyframes + 1
-            for i, kf_image in enumerate(keyframe_images):
-                # Position at (i+1)/(segments) of the total length
-                position = int((i + 1) * length / segments)
-                # Ensure we don't overlap with start or end
-                position = max(1, min(position, length - 2))
-                # Process and place the keyframe
+        # Process keyframes
+        if keyframe_data:
+            # Separate auto and manual positions
+            auto_keyframes = []
+            manual_keyframes = []
+
+            for kf_image, kf_position in keyframe_data:
+                if kf_position == -1:  # -1 means auto
+                    auto_keyframes.append(kf_image)
+                else:
+                    # Clamp position to valid range (1 to length-2 to avoid overlap with start/end)
+                    position = max(1, min(kf_position, length - 2))
+                    manual_keyframes.append((kf_image, position))
+
+            # Place manual position keyframes first
+            for kf_image, position in manual_keyframes:
                 image, mask = process_keyframe(kf_image, position, width, height, length, image, mask)
+
+            # Then distribute auto keyframes evenly
+            if auto_keyframes:
+                num_auto = len(auto_keyframes)
+                segments = num_auto + 1
+
+                # Calculate positions for auto keyframes
+                auto_positions = []
+                for i in range(num_auto):
+                    position = int((i + 1) * length / segments)
+                    # Ensure we don't overlap with start or end
+                    position = max(1, min(position, length - 2))
+                    auto_positions.append(position)
+
+                # Place auto keyframes
+                for kf_image, position in zip(auto_keyframes, auto_positions):
+                    image, mask = process_keyframe(kf_image, position, width, height, length, image, mask)
 
         # Process end image (position length-1)
         image, mask = process_keyframe(end_image, length - 1, width, height, length, image, mask)
