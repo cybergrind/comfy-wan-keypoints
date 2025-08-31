@@ -7,7 +7,7 @@ import torch
 from comfy_api.latest import io
 
 
-def process_keyframe(keyframe_image, position, width, height, length, image, mask, mask_strength=0.0):
+def process_keyframe(keyframe_image, position, width, height, length, image, mask, mask_strength=1.0):
     """
     Helper method to process a keyframe image and update the image tensor and mask.
     Universal approach without conditionals, using VAE's 4-frame grouping.
@@ -20,6 +20,7 @@ def process_keyframe(keyframe_image, position, width, height, length, image, mas
         length: Total video length in frames
         image: The main image tensor to update
         mask: The mask tensor to update
+        mask_strength: How much to preserve the keyframe (1.0 = fully preserve, 0.0 = allow generation)
 
     Returns:
         Updated image and mask tensors
@@ -32,6 +33,11 @@ def process_keyframe(keyframe_image, position, width, height, length, image, mas
         image = torch.ones((length, height, width, 3)) * 0.5
         mask = torch.ones((1, 1, latent.shape[2] * 4, latent.shape[-2], latent.shape[-1]))
     """
+
+    # Convert mask strength to mask value
+    # mask_strength: 1.0 = preserve fully -> mask_value: 0.0
+    # mask_strength: 0.0 = allow generation -> mask_value: 1.0
+    mask_value = 1.0 - mask_strength
 
     # For simplicity, let's keep the special handling for start/end vs middle
     # This matches the original WanFirstLastFrameToVideo behavior
@@ -107,13 +113,15 @@ Placing middle frame: 27. processed_image.shape=torch.Size([1, 480, 320, 3]) ima
         # Mask matches the image group
         mask_start = position
         mask_end = min(mask_start + 1, mask.shape[2])
-        mask[:, :, mask_start - 1 : mask_end - 1] = max(mask_strength + 0.3, 1.0)
-        mask[:, :, mask_start + 1 : mask_end + 1] = max(mask_strength + 0.3, 1.0)
-        mask_strength = mask_strength
+        # Apply variable strength to surrounding frames
+        mask[:, :, mask_start - 1 : mask_end - 1] = max(mask_value + 0.3, 1.0)
+        mask[:, :, mask_start + 1 : mask_end + 1] = max(mask_value + 0.3, 1.0)
 
-    # Apply mask
-    print(f'Applying mask: {mask_start} to {mask_end}. {mask.shape=} length={length} {mask_strength=}')
-    mask[:, :, mask_start:mask_end] = mask_strength
+    # Apply mask with converted value
+    print(
+        f'Applying mask: {mask_start} to {mask_end}. {mask.shape=} {length=} {mask_strength=} {mask_value=}'
+    )
+    mask[:, :, mask_start:mask_end] = mask_value
 
     return image, mask
 
@@ -170,6 +178,47 @@ class WanKeyframes(io.ComfyNode):
                     max=nodes.MAX_RESOLUTION,
                     tooltip='Frame position for keyframe 3. Use -1 for auto enter a specific frame number',
                 ),
+                # Strength inputs - 0.0 to 1.0, where 1.0 means fully preserve the keyframe
+                io.Float.Input(
+                    'keyframe_strength_start',
+                    default=1.0,
+                    min=0.0,
+                    max=1.0,
+                    step=0.1,
+                    tooltip='Preservation strength for start image. 1.0 = preserve fully, 0.0 = allow full generation',
+                ),
+                io.Float.Input(
+                    'keyframe_strength_end',
+                    default=1.0,
+                    min=0.0,
+                    max=1.0,
+                    step=0.1,
+                    tooltip='Preservation strength for end image. 1.0 = preserve fully, 0.0 = allow full generation',
+                ),
+                io.Float.Input(
+                    'keyframe_strength_1',
+                    default=1.0,
+                    min=0.0,
+                    max=1.0,
+                    step=0.1,
+                    tooltip='Preservation strength for keyframe 1. 1.0 = preserve fully, 0.0 = allow full generation',
+                ),
+                io.Float.Input(
+                    'keyframe_strength_2',
+                    default=1.0,
+                    min=0.0,
+                    max=1.0,
+                    step=0.1,
+                    tooltip='Preservation strength for keyframe 2. 1.0 = preserve fully, 0.0 = allow full generation',
+                ),
+                io.Float.Input(
+                    'keyframe_strength_3',
+                    default=1.0,
+                    min=0.0,
+                    max=1.0,
+                    step=0.1,
+                    tooltip='Preservation strength for keyframe 3. 1.0 = preserve fully, 0.0 = allow full generation',
+                ),
             ],
             outputs=[
                 io.Conditioning.Output(display_name='positive'),
@@ -196,6 +245,11 @@ class WanKeyframes(io.ComfyNode):
         keyframe_position_1=-1,
         keyframe_position_2=-1,
         keyframe_position_3=-1,
+        keyframe_strength_start=1.0,
+        keyframe_strength_end=1.0,
+        keyframe_strength_1=1.0,
+        keyframe_strength_2=1.0,
+        keyframe_strength_3=1.0,
         clip_vision_start_image=None,
         clip_vision_end_image=None,
         clip_vision_keyframe_1=None,
@@ -217,16 +271,16 @@ class WanKeyframes(io.ComfyNode):
         mask = torch.ones((1, 1, latent.shape[2] * 4, latent.shape[-2], latent.shape[-1]))
 
         # Process start image (position 0)
-        image, mask = process_keyframe(start_image, 0, width, height, length, image, mask)
+        image, mask = process_keyframe(start_image, 0, width, height, length, image, mask, keyframe_strength_start)
 
-        # Collect keyframe data with their positions
+        # Collect keyframe data with their positions and strengths
         keyframe_data = []
         if keyframe_image_1 is not None:
-            keyframe_data.append((keyframe_image_1, keyframe_position_1))
+            keyframe_data.append((keyframe_image_1, keyframe_position_1, keyframe_strength_1))
         if keyframe_image_2 is not None:
-            keyframe_data.append((keyframe_image_2, keyframe_position_2))
+            keyframe_data.append((keyframe_image_2, keyframe_position_2, keyframe_strength_2))
         if keyframe_image_3 is not None:
-            keyframe_data.append((keyframe_image_3, keyframe_position_3))
+            keyframe_data.append((keyframe_image_3, keyframe_position_3, keyframe_strength_3))
 
         # Process keyframes
         if keyframe_data:
@@ -234,17 +288,17 @@ class WanKeyframes(io.ComfyNode):
             auto_keyframes = []
             manual_keyframes = []
 
-            for kf_image, kf_position in keyframe_data:
+            for kf_image, kf_position, kf_strength in keyframe_data:
                 if kf_position == -1:  # -1 means auto
-                    auto_keyframes.append(kf_image)
+                    auto_keyframes.append((kf_image, kf_strength))
                 else:
                     # Clamp position to valid range (1 to length-2 to avoid overlap with start/end)
                     position = max(1, min(kf_position, length - 2))
-                    manual_keyframes.append((kf_image, position))
+                    manual_keyframes.append((kf_image, position, kf_strength))
 
             # Place manual position keyframes first
-            for kf_image, position in manual_keyframes:
-                image, mask = process_keyframe(kf_image, position, width, height, length, image, mask)
+            for kf_image, position, kf_strength in manual_keyframes:
+                image, mask = process_keyframe(kf_image, position, width, height, length, image, mask, kf_strength)
 
             # Then distribute auto keyframes evenly
             if auto_keyframes:
@@ -260,11 +314,11 @@ class WanKeyframes(io.ComfyNode):
                     auto_positions.append(position)
 
                 # Place auto keyframes
-                for kf_image, position in zip(auto_keyframes, auto_positions):
-                    image, mask = process_keyframe(kf_image, position, width, height, length, image, mask)
+                for (kf_image, kf_strength), position in zip(auto_keyframes, auto_positions):
+                    image, mask = process_keyframe(kf_image, position, width, height, length, image, mask, kf_strength)
 
         # Process end image (position length-1)
-        image, mask = process_keyframe(end_image, length - 1, width, height, length, image, mask)
+        image, mask = process_keyframe(end_image, length - 1, width, height, length, image, mask, keyframe_strength_end)
 
         # Encode the combined image
         concat_latent_image = vae.encode(image[:, :, :, :3])
