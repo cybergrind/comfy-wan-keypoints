@@ -3,7 +3,7 @@ requires = ["setuptools>=70.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "wan_keypoints"
+name = "comfy_wan_keypoints"
 version = "0.9.0"
 description = "WAN Keypoints"
 authors = [
@@ -17,7 +17,8 @@ dependencies = [
 
 ]
 
-
+[dependency-groups]
+dev = ['ruff', 'pre-commit>=4.1.0', 'uv>=0.6.1']
 
 [project.optional-dependencies]
 dev = [
@@ -69,9 +70,9 @@ disable_error_code = "attr-defined"
 
 [tool.ruff]
 # extend-exclude = ["static", "ci/templates"]
-line-length = 140
+line-length = 120
 src = ["src", "tests"]
-target-version = "py39"
+target-version = "py310"
 
 # Add rules to ban exec/eval
 [tool.ruff.lint]
@@ -81,7 +82,35 @@ select = [
     "W293",
     "F",  # The "F" series in Ruff stands for "Pyflakes" rules, which catch various Python syntax errors and undefined names.
     # See all rules here: https://docs.astral.sh/ruff/rules/#pyflakes-f
+    'E',     # pycodestyle
+    'F',     # pyflakes
+    'I',     # isort
+    'G',     # flake8-logging-format
+    'ASYNC', # flake8-async
+    'PIE',   # flake8-pie
+    'T20',   # flake8-print
+    'PT',    # flake8-pytest-style
+    'Q',     # flake8-quotes
+    'RUF',
 ]
+ignore = [
+  'T201',  # print
+  'G004',  # logging format
+  'Q000',  # quotes
+  'Q001',  # quotes
+  'Q003',  # quotes
+]
+fixable = ['ALL']
+
+[tool.ruff.format]
+quote-style = 'single'
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+known-first-party = ['comfy_wan_keypoints']
+lines-after-imports = 2
 
 [tool.ruff.lint.flake8-quotes]
-inline-quotes = "double"
+docstring-quotes = 'double'
+inline-quotes = 'single'
+multiline-quotes = 'single'
