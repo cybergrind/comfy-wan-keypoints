@@ -3,7 +3,7 @@
 """Tests for `wan_keypoints` package."""
 
 import pytest
-from src.wan_keypoints.nodes import Example
+from src.comfy_wan_keypoints.nodes import Example, NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 
 
 @pytest.fixture()

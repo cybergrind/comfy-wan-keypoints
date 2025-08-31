@@ -18,7 +18,12 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ['ruff', 'pre-commit>=4.1.0', 'uv>=0.6.1']
+dev = [
+    'ruff',
+ 'pre-commit>=4.1.0',
+ 'uv>=0.6.1',
+ "pytest>=8.4.1",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -53,6 +58,8 @@ minversion = "8.0"
 testpaths = [
     "tests",
 ]
+python_files = "test_*.py"
+norecursedirs = "__pycache__ .git .venv"
 
 [tool.mypy]
 files = "."
