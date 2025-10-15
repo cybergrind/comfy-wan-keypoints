@@ -113,9 +113,10 @@ Placing middle frame: 27. processed_image.shape=torch.Size([1, 480, 320, 3]) ima
         # Mask matches the image group
         mask_start = position
         mask_end = min(mask_start + 1, mask.shape[2])
-        # Apply variable strength to surrounding frames
-        mask[:, :, mask_start - 1 : mask_end - 1] = max(mask_value + 0.3, 1.0)
-        mask[:, :, mask_start + 1 : mask_end + 1] = max(mask_value + 0.3, 1.0)
+        # Apply variable strength to surrounding frames for smooth blending
+        # Surrounding frames should be less preserved (more generated) than the keyframe
+        mask[:, :, mask_start - 1 : mask_end - 1] = min(mask_value + 0.3, 1.0)
+        mask[:, :, mask_start + 1 : mask_end + 1] = min(mask_value + 0.3, 1.0)
 
     # Apply mask with converted value
     print(
