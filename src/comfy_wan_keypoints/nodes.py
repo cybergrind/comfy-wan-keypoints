@@ -110,13 +110,22 @@ Placing middle frame: 27. processed_image.shape=torch.Size([1, 480, 320, 3]) ima
         #     print(f'Placing middle frame: {i}. {processed_image.shape=} {image.shape=}')
         #     image[i] = processed_image[0]
 
-        # Mask matches the image group
+        # Create gradient: center frame has most preservation, surrounding frames have less
+        # mask_value: 0.0 = fully preserve, 1.0 = fully generate
         mask_start = position
         mask_end = min(mask_start + 1, mask.shape[2])
-        # Apply variable strength to surrounding frames for smooth blending
-        # Surrounding frames should be less preserved (more generated) than the keyframe
-        mask[:, :, mask_start - 1 : mask_end - 1] = min(mask_value + 0.3, 1.0)
-        mask[:, :, mask_start + 1 : mask_end + 1] = min(mask_value + 0.3, 1.0)
+
+        # Surrounding frames: add offset to allow more generation (higher mask value = less preserved)
+        # Use smaller offset (0.15) for smoother gradient
+        surrounding_mask_value = min(mask_value + 0.15, 1.0)
+
+        # Apply to frame before center
+        if mask_start - 1 >= 0:
+            mask[:, :, mask_start - 1 : mask_start] = surrounding_mask_value
+
+        # Apply to frame after center
+        if mask_start + 1 < mask.shape[2]:
+            mask[:, :, mask_start + 1 : mask_end + 1] = surrounding_mask_value
 
     # Apply mask with converted value
     print(
