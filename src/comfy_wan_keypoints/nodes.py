@@ -4,8 +4,8 @@ import comfy.utils
 import node_helpers
 import nodes
 import torch
-from comfy_api.latest import io
 from comfy.utils import common_upscale
+from comfy_api.latest import io
 
 
 def process_keyframe(keyframe_image, position, width, height, length, image, mask, mask_strength=1.0):
@@ -43,7 +43,7 @@ def process_keyframe(keyframe_image, position, width, height, length, image, mas
     # For simplicity, let's keep the special handling for start/end vs middle
     # This matches the original WanFirstLastFrameToVideo behavior
     is_start = position == 0
-    is_end = position == length - 1
+    is_end = (position == length - 1) or (position == -1)
 
     if is_start:
         # Start frame: process from beginning
@@ -129,9 +129,7 @@ Placing middle frame: 27. processed_image.shape=torch.Size([1, 480, 320, 3]) ima
             mask[:, :, mask_start + 1 : mask_end + 1] = surrounding_mask_value
 
     # Apply mask with converted value
-    print(
-        f'Applying mask: {mask_start} to {mask_end}. {mask.shape=} {length=} {mask_strength=} {mask_value=}'
-    )
+    print(f'Applying mask: {mask_start} to {mask_end}. {mask.shape=} {length=} {mask_strength=} {mask_value=}')
     mask[:, :, mask_start:mask_end] = mask_value
 
     return image, mask
@@ -283,7 +281,6 @@ class WanKeyframes(io.ComfyNode):
 
         # Process start image (position 0)
         image, mask = process_keyframe(start_image, 0, width, height, length, image, mask, keyframe_strength_start)
-
         # Collect keyframe data with their positions and strengths
         keyframe_data = []
         if keyframe_image_1 is not None:
@@ -398,9 +395,9 @@ def process_keyframe_vace(
         return image, mask
 
     # Upscale the keyframe image to target dimensions
-    processed_image = common_upscale(
-        keyframe_image[:1].movedim(-1, 1), width, height, 'lanczos', 'disabled'
-    ).movedim(1, -1)
+    processed_image = common_upscale(keyframe_image[:1].movedim(-1, 1), width, height, 'lanczos', 'disabled').movedim(
+        1, -1
+    )
 
     # Convert mask_strength to mask value
     # mask_strength: 1.0 = fully preserve (mask = 0)
@@ -423,12 +420,18 @@ def process_keyframe_vace(
 
     elif is_end:
         # End frame(s)
-        num_frames = min(keyframe_image.shape[0], length)
         processed_image = common_upscale(
-            keyframe_image[-num_frames:].movedim(-1, 1), width, height, 'lanczos', 'disabled'
+            keyframe_image[-length:].movedim(-1, 1), width, height, 'lanczos', 'disabled'
         ).movedim(1, -1)
-        image[-num_frames:] = processed_image
-        mask[-num_frames:] = mask_value
+        num_frames = processed_image.shape[0]
+
+        image_start = length - num_frames - 1
+        image_end = length
+
+        print(f'Placing end frame: {image_start} to {image_end}. {processed_image.shape=} {image.shape=}')
+
+        image[image_start:image_end] = processed_image
+        mask[image_start:image_end] = mask_value
 
     else:
         # Middle keyframe - apply to specific position and surrounding frames for smoothness
